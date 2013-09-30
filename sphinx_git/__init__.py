@@ -21,12 +21,17 @@ from git import Repo
 from sphinx.util.compat import Directive
 
 
+def yesno(argument):
+    return directives.choice(argument, ('yes', 'no'))
+
+
 class GitChangelog(Directive):
 
     option_spec = {
         'revisions': directives.nonnegative_int,
         'rev-list': unicode,
         'detailed-message-pre': bool,
+        'show-tags': yesno,
     }
 
     def run(self):
@@ -36,13 +41,25 @@ class GitChangelog(Directive):
                 ' only rev-list.',
                 line=self.lineno
             )
+
+        self.repo = self._find_repo()
+        self.tagged_commits = self._find_tagged_commits()
+
         commits = self._commits_to_display()
         markup = self._build_markup(commits)
         return markup
 
+    def _should_show_tags(self):
+        return self.options.get('show-tags', 'no') == 'yes'
+
+    def _find_tagged_commits(self):
+        tags = {}
+        for tagref in self.repo.tags:
+            tags[tagref.commit] = tagref.name
+        return tags
+
     def _commits_to_display(self):
-        repo = self._find_repo()
-        commits = self._filter_commits(repo)
+        commits = self._filter_commits(self.repo)
         return commits
 
     def _find_repo(self):
@@ -58,8 +75,17 @@ class GitChangelog(Directive):
         return list(commits)[:revisions_to_display]
 
     def _build_markup(self, commits):
+        markup = []
+
         list_node = nodes.bullet_list()
         for commit in commits:
+
+            if commit in self.tagged_commits:
+                markup.append(list_node)
+                tag_title = nodes.subtitle(text=self.tagged_commits[commit])
+                markup.append(tag_title)
+                list_node = nodes.bullet_list()
+
             date_str = datetime.fromtimestamp(commit.authored_date)
             if '\n' in commit.message:
                 message, detailed_message = commit.message.split('\n', 1)
@@ -83,7 +109,9 @@ class GitChangelog(Directive):
                 else:
                     item.append(nodes.paragraph(text=detailed_message))
             list_node.append(item)
-        return [list_node]
+
+        markup.append(list_node)
+        return markup
 
 
 def setup(app):
