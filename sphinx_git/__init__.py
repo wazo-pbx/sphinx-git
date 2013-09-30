@@ -106,6 +106,10 @@ class GitCommitDetail(GitDirectiveBase):
         return nodes.emphasis(text=self.commit.hexsha[:self.sha_length])
 
 
+def yesno(argument):
+    return directives.choice(argument, ('yes', 'no'))
+
+
 # pylint: disable=too-few-public-methods
 class GitChangelog(GitDirectiveBase):
 
@@ -119,6 +123,7 @@ class GitChangelog(GitDirectiveBase):
         'hide_date': bool,
         'hide_details': bool,
         'repo-dir': six.text_type,
+        'show-tags': yesno,
     }
 
     def run(self):
@@ -128,13 +133,25 @@ class GitChangelog(GitDirectiveBase):
                 ' only rev-list.',
                 line=self.lineno
             )
+
+        self.repo = self._find_repo()
+        self.tagged_commits = self._find_tagged_commits()
+
         commits = self._commits_to_display()
         markup = self._build_markup(commits)
         return markup
 
+    def _should_show_tags(self):
+        return self.options.get('show-tags', 'no') == 'yes'
+
+    def _find_tagged_commits(self):
+        tags = {}
+        for tagref in self.repo.tags:
+            tags[tagref.commit] = tagref.name
+        return tags
+
     def _commits_to_display(self):
-        repo = self._find_repo()
-        commits = self._filter_commits(repo)
+        commits = self._filter_commits(self.repo)
         return commits
 
     def _filter_commits(self, repo):
@@ -166,8 +183,17 @@ class GitChangelog(GitDirectiveBase):
         return filtered_commits
 
     def _build_markup(self, commits):
+        markup = []
+
         list_node = nodes.bullet_list()
         for commit in commits:
+
+            if commit in self.tagged_commits:
+                markup.append(list_node)
+                tag_title = nodes.subtitle(text=self.tagged_commits[commit])
+                markup.append(tag_title)
+                list_node = nodes.bullet_list()
+
             date_str = datetime.fromtimestamp(commit.authored_date)
             if '\n' in commit.message:
                 message, detailed_message = commit.message.split('\n', 1)
@@ -198,7 +224,9 @@ class GitChangelog(GitDirectiveBase):
                 else:
                     item.append(nodes.paragraph(text=detailed_message))
             list_node.append(item)
-        return [list_node]
+
+        markup.append(list_node)
+        return markup
 
 
 def setup(app):
